@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-unit:
+    name: lint + unit/offline (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -m "not integration"
+      - name: Generated T-SQL is current
+        run: python scripts/gen_tsql.py --check
+      - name: Offline smoke test (SQLite + stub, no network)
+        run: |
+          mkdir -p /tmp/smoke && cd /tmp/smoke
+          nl2sql init-sample
+          nl2sql schema -q "revenue by category"
+          nl2sql ask "What are the top 5 products by revenue?" --explain
+          # blocked questions must exit 2
+          set +e
+          nl2sql ask "Delete all orders."; test $? -eq 2 || exit 1
+          nl2sql check "SELECT ssn FROM employees"; test $? -eq 2 || exit 1
+          set -e
+          nl2sql eval -q --out-dir /tmp/smoke/eval
+
+  integration:
+    name: integration (SQL Server 2025, least privilege)
+    runs-on: ubuntu-latest
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2025-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_PID: Developer
+          # Throwaway password for an ephemeral container that only lives for this job.
+          MSSQL_SA_PASSWORD: "Nl2sql-CI-throwaway-9"
+        ports:
+          - 1433:1433
+    env:
+      NL2SQL_MSSQL_DRIVER: pyodbc
+      MASTER_CONN: "Server=localhost,1433;Database=master;UID=sa;PWD=Nl2sql-CI-throwaway-9;Encrypt=yes;TrustServerCertificate=yes"
+      ADMIN_CONN: "Server=localhost,1433;Database=nl2sql_sample;UID=sa;PWD=Nl2sql-CI-throwaway-9;Encrypt=yes;TrustServerCertificate=yes"
+      READER_PASSWORD: "Reader-CI-throwaway-7"
+      WEST_PASSWORD: "West-CI-throwaway-5"
+      NL2SQL_TEST_CONN: "Server=localhost,1433;Database=nl2sql_sample;UID=nl2sql_reader;PWD=Reader-CI-throwaway-7;Encrypt=yes;TrustServerCertificate=yes"
+      NL2SQL_TEST_WEST_CONN: "Server=localhost,1433;Database=nl2sql_sample;UID=nl2sql_reader_west;PWD=West-CI-throwaway-5;Encrypt=yes;TrustServerCertificate=yes"
+      NL2SQL_TEST_ADMIN_CONN: "Server=localhost,1433;Database=nl2sql_sample;UID=sa;PWD=Nl2sql-CI-throwaway-9;Encrypt=yes;TrustServerCertificate=yes"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Microsoft ODBC Driver 18
+        run: |
+          if ! dpkg -s msodbcsql18 >/dev/null 2>&1; then
+            curl -fsSL -o /tmp/packages-microsoft-prod.deb \
+              "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb"
+            sudo dpkg -i /tmp/packages-microsoft-prod.deb
+            sudo apt-get update
+            sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev
+          fi
+          odbcinst -q -d
+      - run: python -m pip install -e ".[dev,pyodbc]"
+      - name: Wait for SQL Server and create the database
+        run: python scripts/wait_for_mssql.py "$MASTER_CONN" --create-db nl2sql_sample --timeout 240
+      - name: Load the sample (as admin)
+        run: nl2sql init-sample --db "mssql:$ADMIN_CONN"
+      - name: Create the read-only logins, permissions and row-level security
+        run: |
+          python scripts/run_tsql.py "$ADMIN_CONN" \
+            sql/mssql/03_login_sqlserver.sql \
+            sql/mssql/04_permissions.sql \
+            sql/mssql/05_row_level_security.sql \
+            -v READER_PASSWORD="$READER_PASSWORD" -v WEST_PASSWORD="$WEST_PASSWORD"
+      - name: Integration tests
+        run: pytest -m integration -v
+      - name: CLI smoke test against SQL Server (as the read-only user)
+        run: |
+          nl2sql schema --conn "$NL2SQL_TEST_CONN" --semantic sample
+          nl2sql ask "What are the top 5 products by revenue?" --conn "$NL2SQL_TEST_CONN" --semantic sample --explain
+          nl2sql eval --conn "$NL2SQL_TEST_CONN" -q --out-dir eval-mssql --name stub-mssql
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-stub-mssql
+          path: eval-mssql/
+          if-no-files-found: ignore
+
+  bicep:
+    name: bicep build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: az bicep install
+      - run: az bicep build --file infra/main.bicep --stdout > /dev/null

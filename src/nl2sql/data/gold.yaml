@@ -1,0 +1,387 @@
+# Gold set for the bundled sample database.
+#
+# Each item: a question, the T-SQL a careful analyst would write, and tags.
+# Gold SQL is T-SQL (the target is Azure SQL); the SQLite backend translates it.
+# Results are compared order-insensitively unless the gold SQL has an
+# ORDER BY at the top level.
+#
+# Tags: simple, filter, join, aggregate, group, order, date, subquery, having,
+# negation, window, self-join, metric, ambiguous.
+# "ambiguous" questions have more than one reasonable answer; the gold SQL is
+# one defensible reading, written down so the score is reproducible.
+
+version: 1
+items:
+  - id: g01
+    question: How many customers do we have?
+    tags: [simple, aggregate]
+    sql: SELECT COUNT(*) AS customer_count FROM customers
+
+  - id: g02
+    question: How many orders were placed in March 2025?
+    tags: [date, aggregate]
+    sql: >-
+      SELECT COUNT(*) AS order_count FROM orders
+      WHERE order_date >= '2025-03-01' AND order_date < '2025-04-01'
+
+  - id: g03
+    question: How many products are in the Tea category?
+    tags: [filter, aggregate]
+    sql: SELECT COUNT(*) AS product_count FROM products WHERE category = 'Tea'
+
+  - id: g04
+    question: List all customers in the West region.
+    tags: [filter]
+    sql: >-
+      SELECT customer_id, first_name, last_name FROM customers WHERE region = 'West'
+
+  - id: g05
+    question: List the products in the Brewing category with their prices.
+    tags: [filter]
+    sql: SELECT name, list_price FROM products WHERE category = 'Brewing'
+
+  - id: g06
+    question: What is our total revenue?
+    tags: [metric, join, aggregate]
+    sql: >-
+      SELECT ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS revenue
+      FROM order_items oi JOIN orders o ON o.order_id = oi.order_id
+      WHERE o.status <> 'cancelled'
+
+  - id: g07
+    question: What was total revenue in Q1 2025?
+    tags: [metric, join, aggregate, date]
+    sql: >-
+      SELECT ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS revenue
+      FROM order_items oi JOIN orders o ON o.order_id = oi.order_id
+      WHERE o.status <> 'cancelled'
+        AND o.order_date >= '2025-01-01' AND o.order_date < '2025-04-01'
+
+  - id: g08
+    question: Show total revenue by month in 2025.
+    tags: [metric, join, group, date, order]
+    sql: >-
+      SELECT MONTH(o.order_date) AS order_month,
+             ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS revenue
+      FROM order_items oi JOIN orders o ON o.order_id = oi.order_id
+      WHERE o.status <> 'cancelled' AND YEAR(o.order_date) = 2025
+      GROUP BY MONTH(o.order_date)
+      ORDER BY order_month
+
+  - id: g09
+    question: What is the revenue by product category?
+    tags: [metric, join, group]
+    sql: >-
+      SELECT p.category,
+             ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS revenue
+      FROM order_items oi
+      JOIN orders o ON o.order_id = oi.order_id
+      JOIN products p ON p.product_id = oi.product_id
+      WHERE o.status <> 'cancelled'
+      GROUP BY p.category
+
+  - id: g10
+    question: What is the revenue by customer region?
+    tags: [metric, join, group]
+    sql: >-
+      SELECT c.region,
+             ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS revenue
+      FROM order_items oi
+      JOIN orders o ON o.order_id = oi.order_id
+      JOIN customers c ON c.customer_id = o.customer_id
+      WHERE o.status <> 'cancelled'
+      GROUP BY c.region
+
+  - id: g11
+    question: Who are the top 5 customers by revenue?
+    tags: [metric, join, group, order]
+    sql: >-
+      SELECT TOP 5 c.customer_id, c.first_name, c.last_name,
+             ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS revenue
+      FROM customers c
+      JOIN orders o ON o.customer_id = c.customer_id
+      JOIN order_items oi ON oi.order_id = o.order_id
+      WHERE o.status <> 'cancelled'
+      GROUP BY c.customer_id, c.first_name, c.last_name
+      ORDER BY revenue DESC
+
+  - id: g12
+    question: What are the top 3 products by units sold?
+    tags: [metric, join, group, order]
+    sql: >-
+      SELECT TOP 3 p.product_id, p.name, SUM(oi.quantity) AS units_sold
+      FROM products p
+      JOIN order_items oi ON oi.product_id = p.product_id
+      JOIN orders o ON o.order_id = oi.order_id
+      WHERE o.status <> 'cancelled'
+      GROUP BY p.product_id, p.name
+      ORDER BY units_sold DESC
+
+  - id: g13
+    question: What are the top 5 products by revenue?
+    tags: [metric, join, group, order]
+    sql: >-
+      SELECT TOP 5 p.product_id, p.name,
+             ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS revenue
+      FROM products p
+      JOIN order_items oi ON oi.product_id = p.product_id
+      JOIN orders o ON o.order_id = oi.order_id
+      WHERE o.status <> 'cancelled'
+      GROUP BY p.product_id, p.name
+      ORDER BY revenue DESC
+
+  - id: g14
+    question: Which sales rep handled the most orders?
+    tags: [join, group, order]
+    sql: >-
+      SELECT TOP 1 e.employee_id, e.first_name, e.last_name, COUNT(*) AS order_count
+      FROM employees e JOIN orders o ON o.employee_id = e.employee_id
+      GROUP BY e.employee_id, e.first_name, e.last_name
+      ORDER BY order_count DESC
+
+  - id: g15
+    question: Who are the top 3 sales reps by revenue?
+    tags: [metric, join, group, order]
+    sql: >-
+      SELECT TOP 3 e.employee_id, e.first_name, e.last_name,
+             ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS revenue
+      FROM employees e
+      JOIN orders o ON o.employee_id = e.employee_id
+      JOIN order_items oi ON oi.order_id = o.order_id
+      WHERE o.status <> 'cancelled'
+      GROUP BY e.employee_id, e.first_name, e.last_name
+      ORDER BY revenue DESC
+
+  - id: g16
+    question: How many orders are there in each status?
+    tags: [group, aggregate]
+    sql: SELECT status, COUNT(*) AS order_count FROM orders GROUP BY status
+
+  - id: g17
+    question: Which orders are still pending?
+    tags: [filter]
+    sql: >-
+      SELECT order_id, customer_id, order_date FROM orders WHERE status = 'pending'
+
+  - id: g18
+    question: How many orders were cancelled?
+    tags: [filter, aggregate]
+    sql: SELECT COUNT(*) AS order_count FROM orders WHERE status = 'cancelled'
+
+  - id: g19
+    question: What is the average order value?
+    tags: [metric, subquery, aggregate]
+    sql: >-
+      SELECT ROUND(AVG(order_total), 2) AS avg_order_value
+      FROM (
+        SELECT o.order_id, SUM(oi.quantity * oi.unit_price * (1 - oi.discount)) AS order_total
+        FROM orders o JOIN order_items oi ON oi.order_id = o.order_id
+        WHERE o.status <> 'cancelled'
+        GROUP BY o.order_id
+      ) AS t
+
+  - id: g20
+    question: Which customers have never placed an order?
+    tags: [negation, subquery]
+    sql: >-
+      SELECT c.customer_id, c.first_name, c.last_name FROM customers c
+      WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.customer_id)
+
+  - id: g21
+    question: Which products have never been sold?
+    tags: [negation, subquery]
+    sql: >-
+      SELECT p.product_id, p.name FROM products p
+      WHERE NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.product_id = p.product_id)
+
+  - id: g22
+    question: How many customers are in each loyalty tier?
+    tags: [group, aggregate]
+    sql: >-
+      SELECT loyalty_tier, COUNT(*) AS customer_count FROM customers GROUP BY loyalty_tier
+
+  - id: g23
+    question: Which city has the most customers?
+    tags: [group, order]
+    sql: >-
+      SELECT TOP 1 city, COUNT(*) AS customer_count FROM customers
+      GROUP BY city ORDER BY customer_count DESC
+
+  - id: g24
+    question: What are the 10 most expensive products?
+    tags: [order]
+    sql: >-
+      SELECT TOP 10 product_id, name, list_price FROM products ORDER BY list_price DESC
+
+  - id: g25
+    question: What is the average number of days between ordering and shipping?
+    tags: [date, aggregate]
+    sql: >-
+      SELECT ROUND(AVG(CAST(DATEDIFF(day, order_date, shipped_date) AS FLOAT)), 2)
+             AS avg_days_to_ship
+      FROM orders WHERE shipped_date IS NOT NULL
+
+  - id: g26
+    question: How many orders did each customer in Seattle place?
+    tags: [join, group, filter]
+    sql: >-
+      SELECT c.customer_id, c.first_name, c.last_name, COUNT(o.order_id) AS order_count
+      FROM customers c LEFT JOIN orders o ON o.customer_id = c.customer_id
+      WHERE c.city = 'Seattle'
+      GROUP BY c.customer_id, c.first_name, c.last_name
+
+  - id: g27
+    question: Which customers have spent more than 1500 in total?
+    tags: [metric, join, group, having]
+    sql: >-
+      SELECT c.customer_id, c.first_name, c.last_name,
+             ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS revenue
+      FROM customers c
+      JOIN orders o ON o.customer_id = c.customer_id
+      JOIN order_items oi ON oi.order_id = o.order_id
+      WHERE o.status <> 'cancelled'
+      GROUP BY c.customer_id, c.first_name, c.last_name
+      HAVING SUM(oi.quantity * oi.unit_price * (1 - oi.discount)) > 1500
+
+  - id: g28
+    question: How many orders were placed each month in 2025?
+    tags: [date, group, order]
+    sql: >-
+      SELECT MONTH(order_date) AS order_month, COUNT(*) AS order_count FROM orders
+      WHERE YEAR(order_date) = 2025
+      GROUP BY MONTH(order_date) ORDER BY order_month
+
+  - id: g29
+    question: Who reports to Ines Duarte?
+    tags: [self-join, filter]
+    sql: >-
+      SELECT e.employee_id, e.first_name, e.last_name
+      FROM employees e JOIN employees m ON m.employee_id = e.manager_id
+      WHERE m.first_name = 'Ines' AND m.last_name = 'Duarte'
+
+  - id: g30
+    question: List each employee with their manager's name.
+    tags: [self-join]
+    sql: >-
+      SELECT e.first_name, e.last_name,
+             m.first_name AS manager_first_name, m.last_name AS manager_last_name
+      FROM employees e LEFT JOIN employees m ON m.employee_id = e.manager_id
+
+  - id: g31
+    question: How many employees are in each department?
+    tags: [group, aggregate]
+    sql: >-
+      SELECT department, COUNT(*) AS employee_count FROM employees GROUP BY department
+
+  - id: g32
+    question: What is the best-selling product in each category by units?
+    tags: [metric, window, join, group]
+    sql: >-
+      WITH u AS (
+        SELECT p.category, p.name, SUM(oi.quantity) AS units_sold,
+               RANK() OVER (PARTITION BY p.category ORDER BY SUM(oi.quantity) DESC) AS rnk
+        FROM products p
+        JOIN order_items oi ON oi.product_id = p.product_id
+        JOIN orders o ON o.order_id = oi.order_id
+        WHERE o.status <> 'cancelled'
+        GROUP BY p.category, p.name
+      )
+      SELECT category, name, units_sold FROM u WHERE rnk = 1
+
+  - id: g33
+    question: What share of revenue comes from Gold tier customers?
+    tags: [metric, join, aggregate]
+    sql: >-
+      SELECT ROUND(100.0 * SUM(CASE WHEN c.loyalty_tier = 'Gold'
+                                    THEN oi.quantity * oi.unit_price * (1 - oi.discount)
+                                    ELSE 0 END)
+                   / SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS gold_revenue_pct
+      FROM order_items oi
+      JOIN orders o ON o.order_id = oi.order_id
+      JOIN customers c ON c.customer_id = o.customer_id
+      WHERE o.status <> 'cancelled'
+
+  - id: g34
+    question: Which customers ordered in both January and December 2025?
+    tags: [subquery, date]
+    sql: >-
+      SELECT c.customer_id, c.first_name, c.last_name FROM customers c
+      WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.customer_id
+                    AND o.order_date >= '2025-01-01' AND o.order_date < '2025-02-01')
+        AND EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.customer_id
+                    AND o.order_date >= '2025-12-01' AND o.order_date < '2026-01-01')
+
+  - id: g35
+    question: What was the largest single order by value?
+    tags: [metric, join, group, order]
+    sql: >-
+      SELECT TOP 1 o.order_id,
+             ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS order_value
+      FROM orders o JOIN order_items oi ON oi.order_id = o.order_id
+      WHERE o.status <> 'cancelled'
+      GROUP BY o.order_id
+      ORDER BY order_value DESC
+
+  - id: g36
+    question: Who are our best customers?
+    tags: [ambiguous, metric, join, group, order]
+    notes: Read as "top 5 by revenue". "Most orders" or "highest loyalty tier" are also defensible.
+    sql: >-
+      SELECT TOP 5 c.customer_id, c.first_name, c.last_name,
+             ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS revenue
+      FROM customers c
+      JOIN orders o ON o.customer_id = c.customer_id
+      JOIN order_items oi ON oi.order_id = o.order_id
+      WHERE o.status <> 'cancelled'
+      GROUP BY c.customer_id, c.first_name, c.last_name
+      ORDER BY revenue DESC
+
+  - id: g37
+    question: Show recent orders.
+    tags: [ambiguous, order]
+    notes: Read as "the 10 most recent". How many is "recent" is a guess.
+    sql: >-
+      SELECT TOP 10 order_id, customer_id, order_date FROM orders
+      ORDER BY order_date DESC, order_id DESC
+
+  - id: g38
+    question: What are our biggest products?
+    tags: [ambiguous, metric, join, group, order]
+    notes: Read as "top 5 by revenue". Units sold or list price are also defensible.
+    sql: >-
+      SELECT TOP 5 p.product_id, p.name,
+             ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS revenue
+      FROM products p
+      JOIN order_items oi ON oi.product_id = p.product_id
+      JOIN orders o ON o.order_id = oi.order_id
+      WHERE o.status <> 'cancelled'
+      GROUP BY p.product_id, p.name
+      ORDER BY revenue DESC
+
+  - id: g39
+    question: How many units of Ethiopia Yirgacheffe were sold?
+    tags: [metric, join, filter]
+    sql: >-
+      SELECT SUM(oi.quantity) AS units_sold
+      FROM order_items oi
+      JOIN orders o ON o.order_id = oi.order_id
+      JOIN products p ON p.product_id = oi.product_id
+      WHERE p.name LIKE 'Ethiopia Yirgacheffe%' AND o.status <> 'cancelled'
+
+  - id: g40
+    question: What is the average discount on order lines?
+    tags: [aggregate]
+    sql: >-
+      SELECT ROUND(AVG(CAST(discount AS FLOAT)), 4) AS avg_discount FROM order_items
+
+  - id: g41
+    question: Which products are discontinued?
+    tags: [filter]
+    sql: SELECT product_id, name FROM products WHERE discontinued = 1
+
+  - id: g42
+    question: How many new customers signed up in 2025?
+    tags: [date, filter, aggregate]
+    sql: >-
+      SELECT COUNT(*) AS customer_count FROM customers
+      WHERE signup_date >= '2025-01-01' AND signup_date < '2026-01-01'

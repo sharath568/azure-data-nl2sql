@@ -1,0 +1,126 @@
+# Semantic layer for the bundled sample database (a small coffee and tea retailer).
+#
+# Copy this next to your own database and edit it. Everything here is
+# documentation for the model *and* policy for the guardrails:
+#
+#   - descriptions, synonyms and metrics go into the schema card (as data;
+#     the prompt tells the model they are not instructions)
+#   - `policy` and `sensitive: true` are enforced in code, whatever the model does
+#
+# Treat this file like code: review changes to it.
+
+version: 1
+
+policy:
+  # Only these tables may appear in a query. Leave out (or null) to allow every
+  # table the connection can see in the allowed schemas.
+  allowed_tables: [customers, products, orders, order_items, employees]
+  allowed_schemas: [dbo]
+  # Exact columns that are off limits, in addition to the patterns below and
+  # any column marked `sensitive: true`.
+  denied_columns: [customers.email]
+  # Applied to every column name in every table. These are the defaults;
+  # listing them here makes them visible to whoever reviews this file.
+  denied_column_patterns: ["*ssn*", "*social_security*", "*salary*", "*password*", "*passwd*",
+                           "*secret*", "*credit_card*", "*card_number*"]
+  max_rows: 100
+  timeout_seconds: 10
+  allow_comments: false
+  cost:
+    max_joins: 6
+    max_subquery_depth: 4
+    block_cartesian: true
+    use_plan_estimates: true
+    max_estimated_rows: 1000000
+    max_estimated_cost: 50
+
+tables:
+  customers:
+    description: People and businesses that buy from us. One row per customer.
+    synonyms: [clients, buyers, shoppers, accounts]
+    columns:
+      customer_id: Surrogate key.
+      first_name: Given name.
+      last_name: Family name.
+      email:
+        description: Contact email. Personal data.
+        sensitive: true
+      city: City of the billing address.
+      state: Two-letter US state code.
+      region:
+        description: Sales region, derived from state. One of East, West, South, Midwest.
+        synonyms: [territory, area]
+      signup_date: Date the customer created their account.
+      loyalty_tier:
+        description: Loyalty programme level. Bronze < Silver < Gold.
+        synonyms: [tier, loyalty, membership]
+
+  products:
+    description: Things we sell. Prices here are current list prices.
+    synonyms: [items, skus, merchandise, catalog]
+    columns:
+      name: Product name as shown on the website.
+      category: One of Coffee, Tea, Brewing, Accessories.
+      list_price:
+        description: Current list price in USD. Historical prices are on order_items.unit_price.
+        synonyms: [price, cost, expensive, cheap]
+      discontinued: 1 if no longer sold, else 0.
+
+  employees:
+    description: Staff. Sales representatives are linked to the orders they handled.
+    synonyms: [staff, reps, sales reps, salespeople, workers]
+    columns:
+      title: Job title.
+      department: One of Sales, Support, Operations.
+      region: Sales region the employee covers. NULL for non-regional roles.
+      hire_date: First day of employment.
+      manager_id: The employee's manager (employees.employee_id). NULL at the top.
+      salary:
+        description: Annual base salary. Restricted to HR.
+        sensitive: true
+      ssn:
+        description: Government ID. Restricted.
+        sensitive: true
+
+  orders:
+    description: One row per order. Status is shipped, pending or cancelled.
+    synonyms: [purchases, sales, transactions]
+    columns:
+      customer_id: The customer who placed the order.
+      employee_id: The sales representative who handled the order.
+      order_date: Date the order was placed. All sample orders are in 2025.
+      status:
+        description: shipped, pending or cancelled (lower case).
+        synonyms: [state]
+      shipped_date: Date the order shipped. NULL unless status = 'shipped'.
+
+  order_items:
+    description: Order lines. One row per product per order.
+    synonyms: [line items, order lines, units]
+    columns:
+      quantity:
+        description: Units ordered.
+        synonyms: [units, sold, volume]
+      unit_price: Price per unit at the time of the order, before discount.
+      discount: Fraction off the line, e.g. 0.10 means 10 percent.
+
+metrics:
+  revenue:
+    description: >-
+      Net sales in USD. Line value after discount, excluding cancelled orders.
+      Needs order_items oi joined to orders o.
+    sql: SUM(oi.quantity * oi.unit_price * (1 - oi.discount))
+    filter: o.status <> 'cancelled'
+    tables: [order_items, orders]
+    synonyms: [sales, spend, spent, income, turnover, value]
+  units_sold:
+    description: Units sold, excluding cancelled orders.
+    sql: SUM(oi.quantity)
+    filter: o.status <> 'cancelled'
+    tables: [order_items, orders]
+    synonyms: [units, quantity, popular, volume]
+
+notes:
+  - Dates are DATE values. Use YEAR(), MONTH() and literal 'YYYY-MM-DD' ranges.
+  - Round money to 2 decimals with ROUND(x, 2).
+  - Status values are lower case.

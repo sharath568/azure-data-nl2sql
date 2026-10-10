@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Generated locally by `nl2sql init-sample` / `nl2sql eval`
+nl2sql_sample.db
+*.db
+*.sqlite
+*.sqlite3
+/semantic.yaml
+eval-results/
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# Bicep / Azure build output
+infra/*.json
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
