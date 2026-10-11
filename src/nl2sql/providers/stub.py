@@ -668,7 +668,12 @@ class TemplateProvider(Provider):
         if date:
             extra.append(date)
         where = self._where(q, ctx, aliases, extra)
-        return f"SELECT COUNT(*) AS {table.rstrip('s')}_count FROM {table}{where}"
+        # A bare COUNT(*) references no column, so SQL Server checks it against
+        # every column and refuses it (error 230) when any column is DENYed.
+        # Counting the primary key gives the same answer and passes the check.
+        pk = _pk(ctx.schema.table(table))
+        what = pk if pk and not where else "*"
+        return f"SELECT COUNT({what}) AS {table.rstrip('s')}_count FROM {table}{where}"
 
     def _list(self, q: str, ctx) -> str | None:
         if not re.match(r"\s*(list|show|which|what are|give me|find)\b", q, re.I):

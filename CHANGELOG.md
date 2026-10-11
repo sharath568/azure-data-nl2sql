@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- SQL Server refuses a bare `SELECT COUNT(*) FROM t` (error 230) when `t` has a
+  column-level DENY, because a count that names no column is checked against
+  every column. Gold question g01 and the stub's plain count now use
+  `COUNT(<primary key>)`, and the integration tests document the engine
+  behaviour.
+
 ## [0.1.0] - 2026-10-10
 
 First release.

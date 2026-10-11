@@ -214,7 +214,10 @@ def test_pricing():
 @pytest.mark.parametrize(
     ("question", "fragment"),
     [
-        ("How many customers do we have?", "SELECT COUNT(*) AS customer_count FROM customers"),
+        (
+            "How many customers do we have?",
+            "SELECT COUNT(customer_id) AS customer_count FROM customers",
+        ),
         ("How many orders were placed in March 2025?", "'2025-03-01'"),
         ("What was total revenue in Q1 2025?", "< '2025-04-01'"),
         ("Who are the top 5 customers by revenue?", "SELECT TOP 5 c.customer_id"),

@@ -15,7 +15,7 @@ items:
   - id: g01
     question: How many customers do we have?
     tags: [simple, aggregate]
-    sql: SELECT COUNT(*) AS customer_count FROM customers
+    sql: SELECT COUNT(customer_id) AS customer_count FROM customers
 
   - id: g02
     question: How many orders were placed in March 2025?

@@ -96,6 +96,8 @@ def test_engine_refuses_writes_when_guardrails_are_bypassed(reader, sql):
         "SELECT first_name FROM dbo.employees WHERE salary > 100000",
         "SELECT first_name FROM dbo.employees ORDER BY salary",
         "SELECT first_name FROM dbo.customers UNION SELECT ssn FROM dbo.employees",
+        # a bare COUNT(*) names no column, so it is checked against all of them
+        "SELECT COUNT(*) FROM dbo.customers",
     ],
 )
 def test_column_deny_enforced_by_the_engine(reader, sql):
@@ -130,12 +132,12 @@ def test_row_level_security_west():
     try:
         regions = west.execute_raw("SELECT DISTINCT region FROM dbo.customers")
         assert regions == [("West",)]
-        west_n = west.execute_raw("SELECT COUNT(*) FROM dbo.customers")[0][0]
-        expected = full.execute_raw("SELECT COUNT(*) FROM dbo.customers WHERE region = N'West'")[0][
-            0
-        ]
+        west_n = west.execute_raw("SELECT COUNT(customer_id) FROM dbo.customers")[0][0]
+        expected = full.execute_raw(
+            "SELECT COUNT(customer_id) FROM dbo.customers WHERE region = N'West'"
+        )[0][0]
         assert west_n == expected
-        assert full.execute_raw("SELECT COUNT(*) FROM dbo.customers")[0][0] == 60
+        assert full.execute_raw("SELECT COUNT(customer_id) FROM dbo.customers")[0][0] == 60
         # the mapping table is not readable by the readers
         with pytest.raises(BackendError):
             west.execute_raw("SELECT * FROM security.reader_regions")

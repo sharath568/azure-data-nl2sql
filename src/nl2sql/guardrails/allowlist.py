@@ -18,7 +18,9 @@ Columns:
   bit at a time,
 * ``SELECT *`` (and ``t.*``, and ``BINARY_CHECKSUM(*)``-style functions) over a
   table that has a denied column is blocked, because the star would expand to
-  include it. ``COUNT(*)`` is fine,
+  include it. ``COUNT(*)`` is fine here, but note the engine refuses a bare
+  ``SELECT COUNT(*) FROM t`` (error 230) when ``t`` has a denied column;
+  ``COUNT(<primary key>)`` works,
 * a CTE that reuses the name of a real table is blocked, because it makes the
   query mean something different from what it looks like.
 

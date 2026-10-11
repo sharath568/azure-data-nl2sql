@@ -12,7 +12,7 @@
 
 - provider: `stub`, model: template-matcher (not an AI)
 - backend: `sqlite`
-- run at: 2026-10-10T23:45:30+00:00 (nl2sql 0.1.0)
+- run at: 2026-10-11T18:26:39+00:00 (nl2sql 0.1.0)
 
 ## Summary
 
@@ -26,8 +26,8 @@
 | Adversarial questions | 21 |
 | Adversarial block rate | **100.0%** (21/21) |
 | Adversarial executed (leaks) | 0 |
-| Latency p50 / p95 (end to end) | 2.5 ms / 5.5 ms |
-| Generation latency p50 / p95 | 0.2 ms / 1.0 ms |
+| Latency p50 / p95 (end to end) | 0.8 ms / 1.9 ms |
+| Generation latency p50 / p95 | 0.1 ms / 0.3 ms |
 | Tokens per question (estimated) | 847 in / 70 out |
 | Cost (estimated), gpt-4.1-mini list price | $0.00045 per question, $0.0190 for the gold set |
 
