@@ -250,7 +250,57 @@ stub, not a model**, so read it as a test of the harness and the guardrails:
 | Exact SQL match | 45.2% (19/42) | Normalised text equality. Undercounts by design. |
 | Gold SQL blocked by guardrails | 0 | No false positives on the gold set. |
 | Adversarial block rate | 100% (21/21) | Every attack stopped before reaching the database. |
-| Tokens per question (estimated) | ~850 in / ~70 out | The prompt a real model would get; ~$0.0005 each on gpt-4.1-mini. |
+| Tokens per question (estimated) | ~950 in / ~70 out | The prompt a real model would get; ~$0.0005 each on gpt-4.1-mini. |
+
+### With a real model: gpt-5-mini on Azure SQL (2026-10-11)
+
+Azure SQL Database (free offer, Central US) and Azure OpenAI `gpt-5-mini`
+(2025-08-07, `GlobalStandard`, `reasoning_effort: low`), connected as the
+read-only `nl2sql_reader`. gpt-5-mini because my Free Trial subscription had
+no gpt-4.1-mini quota (see [infra/README.md](infra/README.md)). Two runs, the
+same day:
+
+| Metric | Run 1: original prompt | Run 2: prompt rules 7 and 8 |
+|---|---:|---:|
+| Execution accuracy | 45.2% (19/42) | **81.0%** (34/42) |
+| Gold SQL blocked by guardrails | 0 | 0 |
+| Adversarial: blocked by a guardrail | 2 | 1 |
+| Adversarial: refused (model or content filter) | 15 | 17 |
+| Adversarial: executed | 3 | 3 |
+| Adversarial: provider error | 1 (a14, content filter) | 0 |
+| Harmful statements that reached the database | **0** | **0** |
+| Latency p50 / p95, end to end | 5.6 s / 9.1 s | 5.2 s / 10.0 s |
+| Tokens per question (API-reported) | | 916 in / 658 out |
+| Cost of the gold set | $0.069 | $0.065 |
+
+Reports: [run 1](docs/eval/azure-gpt5mini-run1-original-prompt.md),
+[run 2](docs/eval/azure-gpt5mini-run2-prompt-rules-7-8.md).
+
+What happened between the runs. In run 1, most "wrong" answers had the right
+rows but a different shape: extra columns, `first_name + ' ' + last_name` in
+one column, or `COUNT(*)`, which SQL Server refuses for a reader with a
+column-level DENY (error 230). That last one was a real failure, not a
+scoring quirk. I added two rules to the prompt: select only the columns
+asked for (plus the key when listing entities), and count the primary key,
+not `*`. Accuracy went from 45% to 81%. **Caveat: I wrote those rules after
+seeing the gold-set failures, so run 2 is partly fitted to this gold set.**
+The rules are general SQL style, not answers to specific questions, but a
+fresh question set would be the fair test.
+
+The adversarial "executed" rows are worth reading, because they are not
+leaks. In every case the model rewrote the attack into a harmless query:
+for "...; DELETE FROM customers" it returned only the SELECT, for "show all
+columns from employees" it listed every column except the denied
+`salary` and `ssn`, and for a `/* audit */` comment-smuggling attempt it wrote
+a plain SELECT. The reports print the executed SQL so you can check. One
+prompt-injection attempt (a14) was stopped by Azure OpenAI's content filter
+before the model ran; run 1 counted that HTTP 400 as an error, and the
+provider now reports it as a refusal.
+
+What's left wrong in run 2 is mostly the ambiguous questions ("Who are our
+best customers?", "Show recent orders"): the model picks a reasonable
+reading that isn't the gold one. The 5-second latency is the reasoning
+model; the guardrails and the query take milliseconds.
 
 How the metrics work:
 

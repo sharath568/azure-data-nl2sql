@@ -57,21 +57,28 @@ before you rely on this.
 
 **Azure OpenAI, per question.** From the committed offline eval
 ([docs/eval/stub-sqlite.md](../docs/eval/stub-sqlite.md)), the prompt nl2sql
-would send for one sample question is about **850 tokens** (system prompt plus
+would send for one sample question is about **950 tokens** (system prompt plus
 the retrieved part of the schema card). A JSON answer is roughly 70 to 150
 tokens. At gpt-4.1-mini list prices ($0.40 per 1M input tokens, $1.60 per 1M
 output tokens, see `src/nl2sql/pricing.py`):
 
 | | Tokens | Cost |
 |---|---|---|
-| One question | ~850 in, ~150 out | ~$0.0006 |
-| Full eval (42 gold + 21 adversarial) | ~55K in, ~10K out | ~$0.04 |
-| 1,000 questions | ~0.85M in, ~0.15M out | ~$0.58 |
+| One question | ~950 in, ~150 out | ~$0.0006 |
+| Full eval (42 gold + 21 adversarial) | ~60K in, ~10K out | ~$0.04 |
+| 1,000 questions | ~0.95M in, ~0.15M out | ~$0.62 |
 
 These are estimates (characters / 4). `nl2sql eval --provider azure-openai`
 reports the real token counts from the API next to them. The schema card is
 most of the prompt, so retrieval (sending only relevant tables) matters more
 for cost than the model choice.
+
+**Measured, 2026-10-11, gpt-5-mini** (the model my Free Trial had quota for):
+916 prompt tokens and **658 completion tokens** per gold question. The
+completion side is four times my estimate because a reasoning model is
+billed for its reasoning tokens, even at `reasoning_effort: low`. The whole
+gold set cost **$0.065** at $0.25 / $2.00 per 1M tokens. Two full eval runs,
+setup and a few test questions came to well under $0.20.
 
 **The budget is an alert, not a cap.** Azure budgets send e-mails; they
 don't stop resources. The free-offer AutoPause does stop the database, but
@@ -83,15 +90,34 @@ These change over time and I couldn't verify all of them from here:
 
 - **Free offer properties.** `useFreeLimit` and `freeLimitExhaustionBehavior`
   compile against the `Microsoft.Sql/servers/databases@2023-08-01` types in
-  Bicep 0.48 with no warnings. The template has not been deployed from this
-  repo's CI. If the deployment rejects them (for example because the
+  Bicep 0.48 with no warnings, and the deployment on 2026-10-11 (Central US)
+  accepted them. If the deployment rejects them (for example because the
   subscription already has its free databases), set `USE_FREE_LIMIT=false`.
   That gives you a normal serverless database billed per vCore-second; it
   still auto-pauses when idle.
-- **Model availability.** `gpt-4.1-mini` version `2025-04-14` with
+- **Model availability and quota.** `gpt-4.1-mini` version `2025-04-14` with
   `GlobalStandard` is widely available but not everywhere. If the deployment
   fails, set `OPENAI_LOCATION` to a region that has it. Use `CHAT_SKU=Standard`
   if you need processing to stay in-region and the region offers it.
+  **Check quota first:** `az cognitiveservices usage list -l <region>`. My
+  Free Trial subscription had a quota of 0 for gpt-4.1-mini everywhere I
+  looked, and `gpt-4o-mini` 2024-07-18 was refused as deprecated
+  (`ServiceModelDeprecated`, since 2026-03-31). It did have 500K TPM of
+  `gpt-5-mini` `GlobalStandard`, so the published Azure run uses
+  `CHAT_MODEL=gpt-5-mini CHAT_MODEL_VERSION=2025-08-07`. The provider
+  detects reasoning models (gpt-5*, o-series) and sends
+  `max_completion_tokens` and `reasoning_effort` instead of `temperature` and
+  `max_tokens`, which they reject.
+- **One Azure OpenAI account per region on a Free Trial.** The trial had an
+  `OpenAI.S0.AccountCount` limit of 1 per region. A second project in the same
+  region fails preflight with `InsufficientQuota`.
+- **macOS: OpenSSL for the driver.** `mssql-python`'s bundled ODBC driver
+  needs OpenSSL 3. With Homebrew's `openssl@3`, connections failed with
+  "OpenSSL library could not be loaded" until I set
+  `DYLD_LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib`. macOS strips that
+  variable when it starts `/bin/sh` or `/bin/bash`, which includes `up.sh`
+  and the `nl2sql` console script, so run `python -m nl2sql` and the setup
+  steps from your own shell.
 - **First connection after a pause.** A paused serverless database resumes on
   the first connection, which can take about a minute and may fail once with
   error 40613. Retry. `up.sh` already does.

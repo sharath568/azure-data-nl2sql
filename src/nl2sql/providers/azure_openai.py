@@ -8,7 +8,12 @@ Configuration (environment or constructor):
     AZURE_OPENAI_ENDPOINT          https://<name>.openai.azure.com
     AZURE_OPENAI_API_KEY           key, or use AZURE_OPENAI_AD_TOKEN (Entra ID bearer)
     AZURE_OPENAI_CHAT_DEPLOYMENT   deployment name (default gpt-4.1-mini)
-    AZURE_OPENAI_API_VERSION       default 2024-10-21
+    AZURE_OPENAI_API_VERSION       default 2024-10-21 (2025-04-01-preview for reasoning models)
+    AZURE_OPENAI_REASONING_EFFORT  reasoning models: minimal | low | medium | high (default low)
+
+Reasoning models (gpt-5*, o1/o3/o4*) reject ``temperature`` and ``max_tokens``.
+For them the request sends ``max_completion_tokens`` (reasoning tokens count
+against it, so the limit is higher) and ``reasoning_effort`` instead.
 """
 
 from __future__ import annotations
@@ -30,6 +35,23 @@ from nl2sql.providers.base import (
 from nl2sql.providers.prompt import RESPONSE_SCHEMA, build_messages
 
 RETRY_STATUS = {408, 429, 500, 502, 503, 504}
+DEFAULT_API_VERSION = "2024-10-21"
+REASONING_API_VERSION = "2025-04-01-preview"
+REASONING_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
+
+def is_reasoning_model(name: str) -> bool:
+    return name.lower().startswith(REASONING_PREFIXES)
+
+
+class ContentFiltered(ProviderError):
+    """Azure OpenAI's content filter rejected the prompt (HTTP 400)."""
+
+
+def _is_content_filter(text: str) -> bool:
+    # The 400 body carries "code": "content_filter"; the message mentions the
+    # "content management policy".
+    return "content_filter" in text or "content management policy" in text
 
 
 class AzureOpenAIProvider(Provider):
@@ -42,11 +64,12 @@ class AzureOpenAIProvider(Provider):
         api_key: str | None = None,
         ad_token: str | None = None,
         deployment: str = "gpt-4.1-mini",
-        api_version: str = "2024-10-21",
+        api_version: str | None = None,
         model: str | None = None,
         timeout_s: float = 60.0,
         max_retries: int = 3,
-        max_tokens: int = 800,
+        max_tokens: int | None = None,
+        reasoning_effort: str = "low",
         client: httpx.Client | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ):
@@ -56,10 +79,14 @@ class AzureOpenAIProvider(Provider):
             raise ProviderError("set AZURE_OPENAI_API_KEY or AZURE_OPENAI_AD_TOKEN")
         self.endpoint = endpoint.rstrip("/")
         self.deployment = deployment
-        self.api_version = api_version
         self.model = model or deployment
+        self.reasoning = is_reasoning_model(self.model)
+        self.api_version = api_version or (
+            REASONING_API_VERSION if self.reasoning else DEFAULT_API_VERSION
+        )
         self.max_retries = max_retries
-        self.max_tokens = max_tokens
+        self.max_tokens = max_tokens or (4000 if self.reasoning else 800)
+        self.reasoning_effort = reasoning_effort
         self._sleep = sleep
         headers = {"Content-Type": "application/json"}
         if api_key:
@@ -76,8 +103,9 @@ class AzureOpenAIProvider(Provider):
             "api_key": os.environ.get("AZURE_OPENAI_API_KEY") or None,
             "ad_token": os.environ.get("AZURE_OPENAI_AD_TOKEN") or None,
             "deployment": os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-4.1-mini"),
-            "api_version": os.environ.get("AZURE_OPENAI_API_VERSION", "2024-10-21"),
+            "api_version": os.environ.get("AZURE_OPENAI_API_VERSION") or None,
             "model": os.environ.get("AZURE_OPENAI_CHAT_MODEL") or None,
+            "reasoning_effort": os.environ.get("AZURE_OPENAI_REASONING_EFFORT") or None,
         }
         kwargs.update({k: v for k, v in overrides.items() if v is not None})
         return cls(**kwargs)
@@ -99,6 +127,8 @@ class AzureOpenAIProvider(Provider):
             else:
                 if resp.status_code < 400:
                     return resp.json()
+                if resp.status_code == 400 and _is_content_filter(resp.text):
+                    raise ContentFiltered(resp.text[:300])
                 if resp.status_code not in RETRY_STATUS:
                     raise ProviderError(
                         f"Azure OpenAI returned {resp.status_code}: {resp.text[:300]}"
@@ -117,17 +147,35 @@ class AzureOpenAIProvider(Provider):
         raise ProviderError(f"Azure OpenAI request failed after retries: {last}")
 
     def generate(self, ctx: GenerationContext) -> Generation:
-        body = {
+        body: dict = {
             "messages": build_messages(ctx),
-            "temperature": 0,
-            "max_tokens": self.max_tokens,
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {"name": "nl2sql_answer", "strict": True, "schema": RESPONSE_SCHEMA},
             },
         }
+        if self.reasoning:
+            body["max_completion_tokens"] = self.max_tokens
+            body["reasoning_effort"] = self.reasoning_effort
+        else:
+            body["temperature"] = 0
+            body["max_tokens"] = self.max_tokens
         start = time.perf_counter()
-        data = self._post(body)
+        try:
+            data = self._post(body)
+        except ContentFiltered:
+            # A refusal by the platform's safety layer, before the model ran.
+            # Report it like a model refusal: no SQL, nothing reaches the database.
+            latency = (time.perf_counter() - start) * 1000
+            return Generation(
+                None,
+                "model refused: the prompt was rejected by Azure OpenAI's content filter",
+                [],
+                self.name,
+                self.model,
+                Usage(0, 0),
+                latency,
+            )
         latency = (time.perf_counter() - start) * 1000
         usage_raw = data.get("usage") or {}
         usage = Usage(

@@ -59,7 +59,7 @@ def to_markdown(report: EvalReport) -> str:
         f"{g['gold_sql_blocked_by_guardrails']} |",
         f"| Adversarial questions | {adv['questions']} |",
         f"| Adversarial block rate | {block} |",
-        f"| Adversarial executed (leaks) | {len(adv['executed'])} |",
+        f"| Adversarial executed (check the SQL below) | {len(adv['executed'])} |",
         f"| Latency p50 / p95 (end to end) | {total_lat} |",
         f"| Generation latency p50 / p95 | {gen_lat} |",
     ]
@@ -89,7 +89,10 @@ def to_markdown(report: EvalReport) -> str:
         "## Adversarial set",
         "",
         "Blocked = a guardrail stopped the generated SQL. Refused = the provider "
-        "produced no SQL. Executed = the query ran (a leak).",
+        "produced no SQL. Executed = the generated SQL passed every guardrail and ran. "
+        "The stub always emits the attack, so for the stub executed means the attack "
+        "got through. A real model may instead rewrite the request into a harmless "
+        "query, so read the executed SQL before calling it a leak.",
         "",
         "| ID | Attack | Outcome | Caught by | Expected | Reason |",
         "|---|---|---|---|---|---|",
@@ -105,6 +108,19 @@ def to_markdown(report: EvalReport) -> str:
             "",
             "Caught by guardrail: " + ", ".join(f"{k} {v}" for k, v in adv["blocked_by"].items()),
         ]
+
+    executed = [a for a in report.adversarial if a.outcome == "executed"]
+    if executed:
+        lines += ["", "### Adversarial questions that executed", ""]
+        for a in executed:
+            lines += [
+                f"**{a.id}** ({a.attack}): {_cell(a.question, 200)}",
+                "",
+                "```sql",
+                (a.sql or "").strip(),
+                "```",
+                "",
+            ]
 
     if report.gold_sql_blocked:
         lines += ["", "## Gold SQL blocked by guardrails", ""]

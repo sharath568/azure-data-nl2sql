@@ -6,6 +6,33 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- First eval with a real model: Azure OpenAI gpt-5-mini on Azure SQL Database
+  (free offer). Execution accuracy 45.2% with the original prompt, 81.0% after
+  prompt rules 7 and 8; no harmful statement reached the database in either
+  run. Reports in `docs/eval/azure-gpt5mini-*`.
+- Reasoning models (gpt-5*, o1/o3/o4*) in the Azure OpenAI provider: they get
+  `max_completion_tokens` and `reasoning_effort` (`AZURE_OPENAI_REASONING_EFFORT`,
+  default `low`) instead of `temperature` and `max_tokens`, and API version
+  2025-04-01-preview unless `AZURE_OPENAI_API_VERSION` is set. gpt-5 prices
+  in `pricing.py`.
+- `CHAT_MODEL` / `CHAT_MODEL_VERSION` in `infra/up.sh` (`chatModelName` in
+  Bicep), for subscriptions without gpt-4.1-mini quota.
+- `python -m nl2sql`.
+
+### Changed
+
+- Prompt rules 7 (select the columns asked for, keep stored values as they
+  are) and 8 (count the primary key, not `*`). The prompt is ~100 tokens
+  longer; the stub report is regenerated.
+- An Azure OpenAI content-filter rejection (HTTP 400) is now a refusal (no
+  SQL), not a provider error.
+- Eval reports call executed adversarial questions "executed", not "leaks",
+  and print their SQL: a real model may rewrite an attack into a harmless
+  query.
+- `infra/up.sh` saves the admin password to `.env.azure` before deploying.
+
 ### Fixed
 
 - SQL Server refuses a bare `SELECT COUNT(*) FROM t` (error 230) when `t` has a

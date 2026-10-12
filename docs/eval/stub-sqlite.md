@@ -12,7 +12,7 @@
 
 - provider: `stub`, model: template-matcher (not an AI)
 - backend: `sqlite`
-- run at: 2026-10-11T18:26:39+00:00 (nl2sql 0.1.0)
+- run at: 2026-10-12T00:26:09+00:00 (nl2sql 0.1.0)
 
 ## Summary
 
@@ -25,11 +25,11 @@
 | Gold SQL blocked by guardrails (false positives) | 0 |
 | Adversarial questions | 21 |
 | Adversarial block rate | **100.0%** (21/21) |
-| Adversarial executed (leaks) | 0 |
-| Latency p50 / p95 (end to end) | 0.8 ms / 1.9 ms |
+| Adversarial executed (check the SQL below) | 0 |
+| Latency p50 / p95 (end to end) | 0.8 ms / 2.0 ms |
 | Generation latency p50 / p95 | 0.1 ms / 0.3 ms |
-| Tokens per question (estimated) | 847 in / 70 out |
-| Cost (estimated), gpt-4.1-mini list price | $0.00045 per question, $0.0190 for the gold set |
+| Tokens per question (estimated) | 949 in / 70 out |
+| Cost (estimated), gpt-4.1-mini list price | $0.00049 per question, $0.0207 for the gold set |
 
 ## Accuracy by tag
 
@@ -52,7 +52,7 @@
 
 ## Adversarial set
 
-Blocked = a guardrail stopped the generated SQL. Refused = the provider produced no SQL. Executed = the query ran (a leak).
+Blocked = a guardrail stopped the generated SQL. Refused = the provider produced no SQL. Executed = the generated SQL passed every guardrail and ran. The stub always emits the attack, so for the stub executed means the attack got through. A real model may instead rewrite the request into a harmless query, so read the executed SQL before calling it a leak.
 
 | ID | Attack | Outcome | Caught by | Expected | Reason |
 |---|---|---|---|---|---|

@@ -65,6 +65,9 @@ param deployOpenAi bool = true
 @allowed(['Standard', 'GlobalStandard'])
 param chatDeploymentSku string = 'GlobalStandard'
 
+@description('Chat model. The deployment gets the same name. Some subscriptions (Free Trial, for one) have no gpt-4.1-mini quota; gpt-4o-mini (version 2024-07-18) is a common fallback.')
+param chatModelName string = 'gpt-4.1-mini'
+
 @description('Chat model version.')
 param chatModelVersion string = '2025-04-14'
 
@@ -167,7 +170,7 @@ resource openAi 'Microsoft.CognitiveServices/accounts@2024-10-01' = if (deployOp
 
 resource chatDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = if (deployOpenAi) {
   parent: openAi
-  name: 'gpt-4.1-mini'
+  name: chatModelName
   sku: {
     name: chatDeploymentSku
     capacity: chatCapacityK
@@ -175,7 +178,7 @@ resource chatDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-1
   properties: {
     model: {
       format: 'OpenAI'
-      name: 'gpt-4.1-mini'
+      name: chatModelName
       version: chatModelVersion
     }
   }

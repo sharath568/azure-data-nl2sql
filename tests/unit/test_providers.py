@@ -79,6 +79,46 @@ def test_azure_request_shape_and_parse(ctx):
     assert gen.tables_used == ["products"]
 
 
+def test_azure_reasoning_model_request_shape(ctx):
+    seen = {}
+
+    def handler(request: httpx.Request):
+        seen["url"] = str(request.url)
+        seen["body"] = json.loads(request.content)
+        return ok_response(
+            {"sql": "SELECT 1", "explanation": "e", "tables_used": [], "answerable": True}
+        )
+
+    p, _ = make_provider(handler, deployment="gpt-5-mini")
+    p.generate(ctx)
+    assert seen["url"].endswith("api-version=2025-04-01-preview")
+    body = seen["body"]
+    assert "temperature" not in body and "max_tokens" not in body
+    assert body["max_completion_tokens"] == 4000
+    assert body["reasoning_effort"] == "low"
+
+
+def test_azure_reasoning_model_by_model_name(ctx):
+    seen = {}
+
+    def handler(request: httpx.Request):
+        seen["body"] = json.loads(request.content)
+        return ok_response(
+            {"sql": "SELECT 1", "explanation": "e", "tables_used": [], "answerable": True}
+        )
+
+    p, _ = make_provider(
+        handler,
+        deployment="chat",
+        model="o4-mini",
+        api_version="2025-01-01",
+        reasoning_effort="minimal",
+    )
+    p.generate(ctx)
+    assert "2025-01-01" in p.url
+    assert seen["body"]["reasoning_effort"] == "minimal"
+
+
 def test_azure_unanswerable(ctx):
     p, _ = make_provider(
         lambda r: ok_response(
@@ -148,6 +188,29 @@ def test_azure_does_not_retry_400(ctx):
     assert len(calls) == 1
 
 
+def test_azure_content_filter_is_a_refusal(ctx):
+    calls = []
+
+    def handler(request: httpx.Request):
+        calls.append(1)
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "code": "content_filter",
+                    "message": "The response was filtered due to the prompt triggering "
+                    "Azure OpenAI's content management policy.",
+                }
+            },
+        )
+
+    p, _ = make_provider(handler)
+    gen = p.generate(ctx)
+    assert gen.sql is None
+    assert "content filter" in gen.explanation
+    assert len(calls) == 1
+
+
 def test_azure_entra_token_header(ctx):
     seen = {}
 
@@ -203,6 +266,7 @@ def test_estimate_tokens():
 def test_pricing():
     assert pricing.price_for("gpt-4.1-mini-2025-04-14") == pricing.PRICES_PER_1M["gpt-4.1-mini"]
     assert pricing.price_for("gpt-4.1") == pricing.PRICES_PER_1M["gpt-4.1"]
+    assert pricing.price_for("gpt-5-mini-2025-08-07") == pricing.PRICES_PER_1M["gpt-5-mini"]
     assert pricing.price_for("llama") is None
     assert pricing.cost_usd(1_000_000, 0, "gpt-4.1-mini") == pytest.approx(0.40)
     assert pricing.cost_usd(1, 1, "unknown") is None

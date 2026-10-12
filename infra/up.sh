@@ -14,6 +14,8 @@
 #   MONTHLY_BUDGET   budget amount                  (default: 10)
 #   DEPLOY_OPENAI    true/false                     (default: true)
 #   CHAT_SKU         GlobalStandard or Standard     (default: GlobalStandard)
+#   CHAT_MODEL       chat model and deployment name (default: gpt-4.1-mini)
+#   CHAT_MODEL_VERSION                              (default: 2025-04-14)
 #   USE_FREE_LIMIT   true/false                     (default: true)
 #
 # The free offer database pauses when its monthly allowance runs out, so it
@@ -27,6 +29,8 @@ OPENAI_LOCATION="${OPENAI_LOCATION:-$LOCATION}"
 MONTHLY_BUDGET="${MONTHLY_BUDGET:-10}"
 DEPLOY_OPENAI="${DEPLOY_OPENAI:-true}"
 CHAT_SKU="${CHAT_SKU:-GlobalStandard}"
+CHAT_MODEL="${CHAT_MODEL:-gpt-4.1-mini}"
+CHAT_MODEL_VERSION="${CHAT_MODEL_VERSION:-2025-04-14}"
 USE_FREE_LIMIT="${USE_FREE_LIMIT:-true}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_ENV="$ROOT/.env.azure"
@@ -43,6 +47,10 @@ fi
 # Letters and digits plus a fixed suffix: no quotes or semicolons, which would
 # break T-SQL literals and connection strings.
 gen_password() { echo "$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 20)Aa1-"; }
+# Re-use the admin password from an earlier run, so a re-run doesn't reset it.
+if [[ -z "${ADMIN_PASSWORD:-}" && -f "$OUT_ENV" ]]; then
+  ADMIN_PASSWORD="$(sed -n 's/^NL2SQL_ADMIN_PASSWORD=//p' "$OUT_ENV")"
+fi
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(gen_password)}"
 READER_PASSWORD="$(gen_password)"
 WEST_PASSWORD="$(gen_password)"
@@ -50,8 +58,16 @@ WEST_PASSWORD="$(gen_password)"
 echo "Resource group : $RG ($LOCATION)"
 echo "Azure SQL      : serverless GP_S_Gen5_2, free offer = $USE_FREE_LIMIT (AutoPause when exhausted)"
 echo "Client IP      : $CLIENT_IP"
-echo "Azure OpenAI   : $DEPLOY_OPENAI (gpt-4.1-mini, $CHAT_SKU, $OPENAI_LOCATION)"
+echo "Azure OpenAI   : $DEPLOY_OPENAI ($CHAT_MODEL $CHAT_MODEL_VERSION, $CHAT_SKU, $OPENAI_LOCATION)"
 echo "Budget         : $MONTHLY_BUDGET per month, alerts to $BUDGET_EMAIL"
+
+# Save the admin password before deploying: if a later step fails (the server
+# exists, the sample isn't loaded), you still need it to re-run.
+umask 077
+{
+  echo "# Written by infra/up.sh. Contains secrets; do not commit."
+  echo "NL2SQL_ADMIN_PASSWORD=$ADMIN_PASSWORD"
+} > "$OUT_ENV"
 
 az group create --name "$RG" --location "$LOCATION" --tags project=nl2sql --output none
 
@@ -67,6 +83,8 @@ OUTPUTS="$(az deployment group create \
       openAiLocation="$OPENAI_LOCATION" \
       deployOpenAi="$DEPLOY_OPENAI" \
       chatDeploymentSku="$CHAT_SKU" \
+      chatModelName="$CHAT_MODEL" \
+      chatModelVersion="$CHAT_MODEL_VERSION" \
       useFreeLimit="$USE_FREE_LIMIT" \
   --query properties.outputs --output json)"
 
@@ -95,6 +113,7 @@ python3 "$ROOT/scripts/run_tsql.py" "$ADMIN_CONN" \
 
 {
   echo "# Written by infra/up.sh. Contains secrets; do not commit."
+  echo "NL2SQL_ADMIN_PASSWORD=$ADMIN_PASSWORD"
   echo "# nl2sql connects as the read-only user:"
   echo "NL2SQL_DB=mssql:${READER_CONN}"
   echo "# Only for re-running setup scripts. nl2sql never reads these:"
